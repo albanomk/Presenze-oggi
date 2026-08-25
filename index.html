@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Presenze">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-512.png">
+<title>Presenze Oggi</title>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<style>
+  :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+  *{box-sizing:border-box}
+  body{margin:0;background:#f5f5f7;color:#111;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+  .wrap{max-width:720px;margin:auto;padding:14px}
+  .card{background:#fff;border-radius:20px;padding:16px;box-shadow:0 8px 28px rgba(0,0,0,.08)}
+  h1{margin:0 0 4px;font-size:28px}
+  .sub{margin:0 0 15px;color:#666}
+  .pick{display:inline-block;background:#111827;color:#fff;padding:13px 16px;border-radius:13px;font-weight:800}
+  input{display:none}
+  #install{margin:12px 0;padding:11px 12px;border-radius:12px;background:#eef2ff;color:#3730a3;font-size:14px}
+  #info{margin:14px 0;font-weight:800}
+  .row{display:grid;grid-template-columns:1fr 110px;border:1px solid #ddd;border-radius:12px;overflow:hidden;margin:8px 0;background:#fff}
+  .name{padding:12px;font-weight:700;display:flex;align-items:center}
+  .state{padding:12px;display:flex;align-items:center;justify-content:center;font-weight:800;text-align:center;min-height:46px}
+  .err{background:#ffe9e9;color:#8b0000;padding:10px;border-radius:10px;margin-top:12px}
+  @media(max-width:520px){.wrap{padding:10px}.row{grid-template-columns:1fr 92px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Presenze Oggi</h1>
+    <p class="sub">Testo esatto della cella + colori Excel.</p>
+
+    <div id="install">Su iPhone: apri in Safari → Condividi → <b>Aggiungi a schermata Home</b>.</div>
+
+    <label class="pick" for="file">Scegli file Excel</label>
+    <input id="file" type="file" accept=".xlsx">
+
+    <div id="info"></div>
+    <div id="out"></div>
+    <div id="err" class="err" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const fileInput=document.getElementById('file');
+const out=document.getElementById('out');
+const info=document.getElementById('info');
+const err=document.getElementById('err');
+const install=document.getElementById('install');
+
+if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+  install.style.display='none';
+}
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+
+function cssColor(argb,fallback){
+  if(!argb)return fallback;
+  let s=String(argb).replace('#','');
+  if(s.length===8)s=s.slice(2);
+  return /^[0-9a-fA-F]{6}$/.test(s)?'#'+s:fallback;
+}
+function sameDay(d,y,m,day){
+  return d && d.getFullYear()===y && d.getMonth()+1===m && d.getDate()===day;
+}
+function excelDate(value,text){
+  if(value instanceof Date)return value;
+  if(typeof value==='number'){
+    const ms=Math.round((value-25569)*86400*1000);
+    const dt=new Date(ms);
+    return new Date(dt.getUTCFullYear(),dt.getUTCMonth(),dt.getUTCDate());
+  }
+  const s=String(text||value||'').trim();
+  const mm=s.match(/^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?$/);
+  if(mm){
+    let y=mm[3]?Number(mm[3]):new Date().getFullYear();
+    if(y<100)y+=2000;
+    return new Date(y,Number(mm[2])-1,Number(mm[1]));
+  }
+  return null;
+}
+
+fileInput.addEventListener('change',async()=>{
+  err.style.display='none'; out.innerHTML=''; info.textContent='Lettura file...';
+  try{
+    const f=fileInput.files[0]; if(!f)return;
+    const buf=await f.arrayBuffer();
+    const wb=new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+
+    const now=new Date();
+    const y=now.getFullYear(),m=now.getMonth()+1,d=now.getDate();
+    let wsFound=null,colFound=null;
+
+    wb.eachSheet(ws=>{
+      if(wsFound)return;
+      for(let c=3;c<=33;c++){
+        const cell=ws.getCell(6,c);
+        if(sameDay(excelDate(cell.value,cell.text),y,m,d)){
+          wsFound=ws; colFound=c; break;
+        }
+      }
+    });
+    if(!wsFound)throw new Error("Non trovo la data di oggi nella riga 6.");
+
+    info.textContent=`${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y} · ${wsFound.name}`;
+
+    for(let r=7;r<=49;r++){
+      const name=String(wsFound.getCell(r,2).text||'').trim();
+      if(!name)continue;
+      const cell=wsFound.getCell(r,colFound);
+      const text=String(cell.text ?? '');
+
+      let bg='#ffffff';
+      if(cell.fill && cell.fill.type==='pattern' && cell.fill.fgColor) bg=cssColor(cell.fill.fgColor.argb,bg);
+
+      let fg='#111111';
+      if(cell.font && cell.font.color) fg=cssColor(cell.font.color.argb,fg);
+
+      const row=document.createElement('div'); row.className='row';
+      const n=document.createElement('div'); n.className='name'; n.textContent=name;
+      const s=document.createElement('div'); s.className='state'; s.style.background=bg; s.style.color=fg; s.textContent=text;
+      row.appendChild(n); row.appendChild(s); out.appendChild(row);
+    }
+  }catch(e){
+    info.textContent=''; err.textContent=e.message||String(e); err.style.display='block';
+  }
+});
+</script>
+</body>
+</html>
