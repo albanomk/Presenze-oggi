@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Presenze per Data</title>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f5f5f7;color:#111}
+  .wrap{max-width:720px;margin:auto;padding:16px}
+  .card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 28px rgba(0,0,0,.08)}
+  h1{margin:0 0 6px;font-size:28px}
+  p{margin:0 0 14px;color:#666}
+  .pick{display:inline-block;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700}
+  input{display:none}
+  .date-wrap{display:none;margin-top:14px}
+  .date-wrap label{display:block;font-size:13px;color:#666;margin-bottom:6px;font-weight:700}
+  select{width:100%;font:inherit;font-weight:700;padding:12px 14px;border:1px solid #d1d1d6;border-radius:12px;background:#fff;color:#111}
+  #info{margin:14px 0;font-weight:700}
+  .row{display:grid;grid-template-columns:1fr 110px;border:1px solid #ddd;border-radius:12px;overflow:hidden;margin:8px 0;background:white}
+  .name{padding:12px;font-weight:700;display:flex;align-items:center}
+  .state{padding:12px;display:flex;align-items:center;justify-content:center;font-weight:800;text-align:center;min-height:46px}
+  .err{background:#ffe9e9;color:#8b0000;padding:10px;border-radius:10px;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Presenze</h1>
+    <p>Scegli il file Excel, poi seleziona la data da visualizzare.</p>
+
+    <label class="pick" for="file">Scegli file Excel</label>
+    <input id="file" type="file" accept=".xlsx">
+
+    <div id="dateWrap" class="date-wrap">
+      <label for="dateSelect">Data da visualizzare</label>
+      <select id="dateSelect"></select>
+    </div>
+
+    <div id="info"></div>
+    <div id="out"></div>
+    <div id="err" class="err" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const fileInput = document.getElementById('file');
+const dateWrap = document.getElementById('dateWrap');
+const dateSelect = document.getElementById('dateSelect');
+const out = document.getElementById('out');
+const info = document.getElementById('info');
+const err = document.getElementById('err');
+
+let workbook = null;
+let availableDates = [];
+
+function cssColor(argb, fallback){
+  if(!argb) return fallback;
+  let s = String(argb).replace('#','');
+  if(s.length === 8) s = s.slice(2);
+  return /^[0-9a-fA-F]{6}$/.test(s) ? '#' + s : fallback;
+}
+
+function excelDate(value, text){
+  if(value instanceof Date) return value;
+  if(typeof value === 'number'){
+    const ms = Math.round((value - 25569) * 86400 * 1000);
+    return new Date(ms);
+  }
+  const s = String(text || value || '').trim();
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?$/);
+  if(m){
+    let y = m[3] ? Number(m[3]) : new Date().getFullYear();
+    if(y < 100) y += 2000;
+    return new Date(y, Number(m[2])-1, Number(m[1]));
+  }
+  return null;
+}
+
+function dateKey(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function dateLabel(d){
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
+
+function collectDates(){
+  availableDates = [];
+  workbook.eachSheet(ws => {
+    for(let c=3;c<=33;c++){
+      const cell = ws.getCell(6,c);
+      const dt = excelDate(cell.value, cell.text);
+      if(dt && !Number.isNaN(dt.getTime())){
+        availableDates.push({
+          key: dateKey(dt),
+          date: dt,
+          label: dateLabel(dt),
+          sheetName: ws.name,
+          col: c
+        });
+      }
+    }
+  });
+
+  availableDates.sort((a,b) => a.date - b.date);
+}
+
+function renderSelected(){
+  err.style.display='none';
+  out.innerHTML='';
+
+  const selected = availableDates[Number(dateSelect.value)];
+  if(!selected){
+    info.textContent='';
+    return;
+  }
+
+  const ws = workbook.getWorksheet(selected.sheetName);
+  if(!ws) return;
+
+  info.textContent = `${selected.label} · ${selected.sheetName}`;
+
+  for(let r=7;r<=49;r++){
+    const name = String(ws.getCell(r,2).text || '').trim();
+    if(!name) continue;
+
+    const cell = ws.getCell(r,selected.col);
+    const text = String(cell.text ?? '');
+
+    let bg = '#ffffff';
+    if(cell.fill && cell.fill.type === 'pattern' && cell.fill.fgColor){
+      bg = cssColor(cell.fill.fgColor.argb, bg);
+    }
+
+    let fg = '#111111';
+    if(cell.font && cell.font.color){
+      fg = cssColor(cell.font.color.argb, fg);
+    }
+
+    const row = document.createElement('div');
+    row.className='row';
+
+    const n = document.createElement('div');
+    n.className='name';
+    n.textContent=name;
+
+    const s = document.createElement('div');
+    s.className='state';
+    s.style.background=bg;
+    s.style.color=fg;
+    s.textContent=text;
+
+    row.appendChild(n);
+    row.appendChild(s);
+    out.appendChild(row);
+  }
+}
+
+fileInput.addEventListener('change', async () => {
+  err.style.display='none';
+  out.innerHTML='';
+  dateWrap.style.display='none';
+  info.textContent='Lettura file...';
+
+  try{
+    const f = fileInput.files[0];
+    if(!f) return;
+
+    const buf = await f.arrayBuffer();
+    workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buf);
+
+    collectDates();
+    if(!availableDates.length) throw new Error('Non trovo date valide nella riga 6.');
+
+    dateSelect.innerHTML='';
+    availableDates.forEach((item,index) => {
+      const opt = document.createElement('option');
+      opt.value = index;
+      opt.textContent = `${item.label} — ${item.sheetName}`;
+      dateSelect.appendChild(opt);
+    });
+
+    const today = dateKey(new Date());
+    let initialIndex = availableDates.findIndex(x => x.key === today);
+    if(initialIndex < 0) initialIndex = 0;
+    dateSelect.value = String(initialIndex);
+
+    dateWrap.style.display='block';
+    renderSelected();
+
+  }catch(e){
+    info.textContent='';
+    err.textContent = e.message || String(e);
+    err.style.display='block';
+  }
+});
+
+dateSelect.addEventListener('change', renderSelected);
+</script>
+</body>
+</html>
